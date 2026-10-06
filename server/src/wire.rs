@@ -1,6 +1,13 @@
 
-use bson::Document;
+use bson::{Document, doc, oid::ObjectId};
 use bytes::Buf;
+use std::io::{Write};
+use std::sync::OnceLock;
+
+fn get_process_id() -> &'static ObjectId {
+  static PROCESS_ID: OnceLock<ObjectId> = OnceLock::new();
+  PROCESS_ID.get_or_init(ObjectId::new)
+}
 
 #[derive(Debug)]
 pub enum Payload {
@@ -37,7 +44,7 @@ pub enum OpMsgSection {
   },
 }
 
-pub fn decode_op_query_payload(payload: &Vec<u8>) -> Result<Payload, Box<dyn std::error::Error>> {
+pub fn decode_op_query_payload(payload: &Vec<u8>) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
   let mut cursor = &payload[..];
 
   let flags = cursor.get_i32_le();
@@ -62,7 +69,7 @@ pub fn decode_op_query_payload(payload: &Vec<u8>) -> Result<Payload, Box<dyn std
   })
 }
 
-pub fn decode_op_reply_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error>> {
+pub fn decode_op_reply_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
   let mut cursor = &payload[..];
 
   let response_flags = cursor.get_i32_le();
@@ -86,7 +93,7 @@ pub fn decode_op_reply_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::e
   })
 }
 
-pub fn decode_op_msg_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error>> {
+pub fn decode_op_msg_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
   let mut cursor = &payload[..];
 
   let flag_bits = cursor.get_i32_le();
@@ -100,7 +107,7 @@ pub fn decode_op_msg_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::err
 
 fn decode_op_msg_payload_sections(
   payload: &[u8]
-) -> Result<Vec<OpMsgSection>, Box<dyn std::error::Error>> {
+) -> Result<Vec<OpMsgSection>, Box<dyn std::error::Error + Send + Sync>> {
   let mut sections = Vec::new();
   let mut cursor = &payload[..];
 
@@ -143,7 +150,7 @@ fn decode_op_msg_payload_sections(
   Ok(sections)
 }
 
-fn read_null_terminated_string(buf: &mut &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+fn read_null_terminated_string(buf: &mut &[u8]) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
   let pos = buf
     .iter()
     .position(|&b| b == 0)
@@ -154,3 +161,131 @@ fn read_null_terminated_string(buf: &mut &[u8]) -> Result<String, Box<dyn std::e
   Ok(s)
 }
 
+pub async fn get_encoded_response(message: Payload) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+  let response = get_response(message).await?;
+  let encoded_response = encode_message(response);
+  Ok(encoded_response)
+}
+
+pub async fn get_response(message: Payload) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+  match message {
+    Payload::OpQuery {..} => {
+      Ok(Payload::OpReply { 
+        response_flags: 0,
+        cursor_id: 0,
+        starting_from: 0,
+        number_returned: 1,
+        documents: Vec::from([
+          doc! {
+            "helloOk": true,
+          },
+        ]),
+      })
+    },
+    Payload::OpMsg { sections, .. } => {
+      let response = get_op_msg_response(sections).await;
+
+      match response {
+        Ok(response) => Ok(response),
+        Err(err) => Err(err),
+      }
+    },
+    _ => Err("Invalid opcode".into()),
+  }
+}
+
+pub fn encode_message(response: Payload) -> Vec<u8> {
+  println!("{:?}", response);
+  match response {
+    Payload::OpMsg { flag_bits, sections } => {
+      encode_op_msg_payload(Payload::OpMsg { flag_bits, sections })
+    },
+    Payload::OpQuery { .. } => {
+      vec![]
+    },
+    Payload::OpReply { .. } => {
+      vec![]
+    },
+  }
+}
+
+pub fn encode_op_msg_payload(payload: Payload) -> Vec<u8> {
+  if let Payload::OpMsg { flag_bits, sections } = payload {
+    let mut buf = Vec::new();
+
+    buf.extend_from_slice(&flag_bits.to_le_bytes());
+
+    let sections_bytes = encode_op_msg_payload_sections(&sections);
+    let _ = buf.write_all(&sections_bytes);
+
+    buf
+  } else {
+    panic!("Expected an op_msg_payload");
+  }
+}
+
+fn encode_op_msg_payload_sections(sections: &[OpMsgSection]) -> Vec<u8> {
+  let mut sections_bytes = Vec::new();
+
+  for section in sections {
+    match section {
+      OpMsgSection::KindZero { document } => {
+        sections_bytes.push(0);
+
+        let mut doc_bytes = Vec::new();
+        let _ = document.to_writer(&mut doc_bytes);
+        let _ = sections_bytes.write_all(&doc_bytes);
+      },
+      OpMsgSection::KindOne { 
+        document_sequence_identifier,
+        documents,
+        ..
+      } => {
+        sections_bytes.push(1);
+
+        let identifier_bytes = document_sequence_identifier.as_bytes();
+
+        let mut documents_bytes = Vec::new();
+        for doc in documents {
+          let _ = doc.to_writer(&mut documents_bytes);
+        }
+
+        let size = 4 + identifier_bytes.len() + documents_bytes.len();
+        let _ = sections_bytes.extend_from_slice(&(size as i32).to_le_bytes());
+        let _ = sections_bytes.write_all(identifier_bytes);
+        let _ = sections_bytes.write_all(&documents_bytes);
+      }
+    }
+  }
+
+  sections_bytes
+}
+
+
+pub async fn get_op_msg_response(_section: Vec<OpMsgSection>) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+  Ok(Payload::OpMsg {
+    flag_bits: 0,
+    sections: Vec::from([
+      OpMsgSection::KindZero { 
+        document: doc! {
+          "helloOk": true,
+          "isMaster": true,
+          "topologyVersion": {
+            "processId": get_process_id(),
+            "counter": 0i64,
+          },
+          "maxBsonObjectSize": 16777216i32,
+          "maxMessageSizeBytes": 48000000i32,
+          "maxWriteBatchSize": 100000i32,
+          "localTime": bson::DateTime::now(),
+          "logicalSessionTimeoutMinutes": 30i32,
+          "connectionId": 15i32,
+          "minWireVersion": 0i32,
+          "maxWireVersion": 21i32,
+          "readOnly": false,
+          "ok": 1i32,
+        }
+      },
+    ]) 
+  })
+}

@@ -1,7 +1,13 @@
 use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use bytes::Buf;
-use server::wire::{Payload, decode_op_query_payload, decode_op_msg_payload, decode_op_reply_payload};
+use server::wire::{
+  Payload,
+  decode_op_query_payload,
+  decode_op_msg_payload,
+  decode_op_reply_payload,
+  get_encoded_response,
+};
 
 #[tokio::main]
 async fn main() {
@@ -11,13 +17,14 @@ async fn main() {
     let (socket, _) = listener.accept().await.unwrap();
 
     tokio::spawn(async move {
-        process(socket).await;
+      let _ = process(socket).await;
     });
   }
 }
 
-async fn process(stream: TcpStream) {
-  let mut reader = BufReader::new(stream);
+async fn process(stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let (reader, mut writer) = tokio::io::split(stream);
+  let mut reader = BufReader::new(reader);
   
   loop {
     let mut header = [0u8; 16];
@@ -44,7 +51,7 @@ async fn process(stream: TcpStream) {
 
     println!("{:?}", payload);
 
-    let payload: Result<Payload, Box<dyn std::error::Error>> = match op_code {
+    let payload: Result<Payload, Box<dyn std::error::Error + Send + Sync>> = match op_code {
       2004 => decode_op_query_payload(&payload),
       1 => decode_op_reply_payload(&payload),
       2013 => decode_op_msg_payload(&payload),
@@ -53,6 +60,17 @@ async fn process(stream: TcpStream) {
 
     println!("{:?}", payload);
 
+    if let Ok(payload) = payload {
+      if let Ok(response_buf) = get_encoded_response(payload).await {
+        println!("{:?}", response_buf);
+        if let Err(err) = writer.write_all(&response_buf).await {
+          eprint!("{:?}", err);
+        };
+      }
+    }
+
   }
+
+  Ok(())
 }
 
