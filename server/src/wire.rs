@@ -10,6 +10,14 @@ fn get_process_id() -> &'static ObjectId {
 }
 
 #[derive(Debug)]
+pub struct MessageHeader {
+  pub message_length: usize,
+  pub request_id: u32,
+  pub response_to: u32,
+  pub op_code: u32,
+}
+
+#[derive(Debug)]
 pub enum Payload {
   OpQuery {
     flags: i32,
@@ -161,14 +169,20 @@ fn read_null_terminated_string(buf: &mut &[u8]) -> Result<String, Box<dyn std::e
   Ok(s)
 }
 
-pub async fn get_encoded_response(message: Payload) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-  let response = get_response(message).await?;
-  let encoded_response = encode_message(response);
+pub async fn get_encoded_response(message_header: MessageHeader, payload: Payload) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+  let response_payload = get_response_payload(payload).await?;
+  let response_header = MessageHeader {
+    message_length: 0, // will be set by encoder
+    request_id: 1, // TODO: Unhardcode - maintain state for each connection
+    response_to: message_header.request_id,
+    op_code: if message_header.op_code == 2004 { 1 } else { 2013 },
+  };
+  let encoded_response = encode_message(response_header, response_payload);
   Ok(encoded_response)
 }
 
-pub async fn get_response(message: Payload) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
-  match message {
+pub async fn get_response_payload(payload: Payload) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+  match payload {
     Payload::OpQuery {..} => {
       Ok(Payload::OpReply { 
         response_flags: 0,
@@ -194,9 +208,11 @@ pub async fn get_response(message: Payload) -> Result<Payload, Box<dyn std::erro
   }
 }
 
-pub fn encode_message(response: Payload) -> Vec<u8> {
-  println!("{:?}", response);
-  match response {
+pub fn encode_message(header: MessageHeader, payload: Payload) -> Vec<u8> {
+  println!("{:?}", header);
+  println!("{:?}", payload);
+  
+  let payload_buf = match payload {
     Payload::OpMsg { flag_bits, sections } => {
       encode_op_msg_payload(Payload::OpMsg { flag_bits, sections })
     },
@@ -206,7 +222,18 @@ pub fn encode_message(response: Payload) -> Vec<u8> {
     Payload::OpReply { .. } => {
       vec![]
     },
-  }
+  };
+
+  let message_length = 16 + payload_buf.len();
+  let mut response_message_buf = Vec::with_capacity(message_length);
+
+  response_message_buf.extend_from_slice(&(message_length as u32).to_le_bytes());
+  response_message_buf.extend_from_slice(&header.request_id.to_le_bytes());
+  response_message_buf.extend_from_slice(&header.response_to.to_le_bytes());
+  response_message_buf.extend_from_slice(&header.op_code.to_le_bytes());
+  response_message_buf.extend_from_slice(&payload_buf);
+
+  response_message_buf
 }
 
 pub fn encode_op_msg_payload(payload: Payload) -> Vec<u8> {

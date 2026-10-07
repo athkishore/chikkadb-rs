@@ -2,16 +2,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use bytes::Buf;
 use server::wire::{
-  Payload,
-  decode_op_query_payload,
-  decode_op_msg_payload,
-  decode_op_reply_payload,
-  get_encoded_response,
+  MessageHeader, Payload, decode_op_msg_payload, decode_op_query_payload, decode_op_reply_payload, get_encoded_response,
 };
 
 #[tokio::main]
 async fn main() {
-  let listener = TcpListener::bind("127.0.0.1:27017").await.unwrap();
+  let listener = TcpListener::bind("127.0.0.1:9000").await.unwrap();
 
   loop {
     let (socket, _) = listener.accept().await.unwrap();
@@ -36,9 +32,16 @@ async fn process(stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Se
 
     let mut cursor = &header[..];
     let message_length = cursor.get_u32_le() as usize;
-    let _request_id = cursor.get_u32_le();
-    let _response_to = cursor.get_u32_le();
+    let request_id = cursor.get_u32_le();
+    let response_to = cursor.get_u32_le();
     let op_code = cursor.get_u32_le();
+
+    let message_header = MessageHeader {
+      message_length,
+      request_id,
+      response_to,
+      op_code,
+    };
 
     if message_length < 16 {
       break;
@@ -61,7 +64,7 @@ async fn process(stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Se
     println!("{:?}", payload);
 
     if let Ok(payload) = payload {
-      if let Ok(response_buf) = get_encoded_response(payload).await {
+      if let Ok(response_buf) = get_encoded_response(message_header, payload).await {
         println!("{:?}", response_buf);
         if let Err(err) = writer.write_all(&response_buf).await {
           eprint!("{:?}", err);
