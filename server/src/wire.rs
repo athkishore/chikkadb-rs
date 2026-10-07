@@ -52,7 +52,7 @@ pub enum OpMsgSection {
   },
 }
 
-pub fn decode_op_query_payload(payload: &Vec<u8>) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+pub fn decode_op_query_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
   let mut cursor = &payload[..];
 
   let flags = cursor.get_i32_le();
@@ -75,6 +75,15 @@ pub fn decode_op_query_payload(payload: &Vec<u8>) -> Result<Payload, Box<dyn std
     query,
     return_fields_selector,
   })
+}
+
+pub fn decode_payload(op_code: u32, payload_buf: &[u8]) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {
+  match op_code {
+    2004 => decode_op_query_payload(payload_buf),
+    1 => decode_op_reply_payload(payload_buf),
+    2013 => decode_op_msg_payload(payload_buf),
+    _ => Err("unknown opcode".into()),
+  }
 }
 
 pub fn decode_op_reply_payload(payload: &[u8]) -> Result<Payload, Box<dyn std::error::Error + Send + Sync>> {

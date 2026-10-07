@@ -2,7 +2,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use bytes::Buf;
 use server::wire::{
-  MessageHeader, Payload, decode_op_msg_payload, decode_op_query_payload, decode_op_reply_payload, get_encoded_response,
+  MessageHeader, decode_payload, get_encoded_response,
 };
 
 #[tokio::main]
@@ -54,12 +54,13 @@ async fn process(stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Se
 
     println!("{:?}", payload);
 
-    let payload: Result<Payload, Box<dyn std::error::Error + Send + Sync>> = match op_code {
-      2004 => decode_op_query_payload(&payload),
-      1 => decode_op_reply_payload(&payload),
-      2013 => decode_op_msg_payload(&payload),
-      _ => Err("unknown opcode".into()),
-    };
+    // let payload: Result<Payload, Box<dyn std::error::Error + Send + Sync>> = match op_code {
+    //   2004 => decode_op_query_payload(&payload),
+    //   1 => decode_op_reply_payload(&payload),
+    //   2013 => decode_op_msg_payload(&payload),
+    //   _ => Err("unknown opcode".into()),
+    // };
+    let payload = decode_payload(op_code, &payload);
 
     println!("{:?}", payload);
 
