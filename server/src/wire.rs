@@ -302,89 +302,198 @@ pub async fn get_op_msg_response(sections: Vec<OpMsgSection>) -> Result<Payload,
   let body = &sections[0];
   let command = get_command_from_op_msg_body(body);
 
-  // Ok(Payload::OpMsg {
-  //   flag_bits: 0,
-  //   sections: Vec::from([
-  //     OpMsgSection::KindZero { 
-  //       document: doc! {
-  //         // "helloOk": true,
-  //         "isMaster": true,
-  //         "topologyVersion": {
-  //           "processId": get_process_id(),
-  //           "counter": 0i64,
-  //         },
-  //         "maxBsonObjectSize": 16777216i32,
-  //         "maxMessageSizeBytes": 48000000i32,
-  //         // "maxWriteBatchSize": 100000i32,
-  //         // "localTime": bson::DateTime::now(),
-  //         // "logicalSessionTimeoutMinutes": 30i32,
-  //         // "connectionId": 15i32,
-  //         "minWireVersion": 0i32,
-  //         "maxWireVersion": 21i32,
-  //         // "readOnly": false,
-  //         "ok": 1i32,
-  //       }
-  //     },
-  //   ]) 
-  // })
-
-  // Ok(response_payload);
-}
-
-enum MQLCommand {
-  Create {
-    database: String,
-    collection: String,
-  },
-  Drop {
-    database: String,
-    collection: String,
-  },
-  DropDatabase {
-    database: String,
-  },
-  Insert {
-    database: String,
-    collection: String,
-    documents: Vec<Document>,
-  },
-  Find {
-    database: String,
-    collection: String,
-    filter: Document,
-    projection: Option<Document>,
-    sort: Option<Document>,
-    limit: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
-    skip: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
-  },
-  Count {
-    database: String,
-    collection: String,
-    query: Document,
-    limit: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
-    skip: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
-  },
-  Update {
-    database: String,
-    collection: String,
-    updates: Vec<(Document, Document)>, // (q, u)
-  },
-  FindAndModify {
-    database: String,
-    collection: String,
-    query: Document,
-    update: Document,
-  },
-  Delete {
-    database: String,
-    collection: Document,
-    deletes: Vec<(Document, u32)>, // (q, limit); Check if u32 is the appropriate type here
-  },
-  BuildInfo {
-    database: String,
+  match command {
+    Ok(MQLCommand::IsMaster { .. }) => {
+      Ok(Payload::OpMsg { 
+        flag_bits: 0, 
+        sections: Vec::from([
+          OpMsgSection::KindZero {
+            document: doc! {
+              // "helloOk": true,
+              "isMaster": true,
+              "topologyVersion": {
+                "processId": get_process_id(),
+                "counter": 0i64,
+              },
+              "maxBsonObjectSize": 16777216i32,
+              "maxMessageSizeBytes": 48000000i32,
+              // "maxWriteBatchSize": 100000i32,
+              // "localTime": bson::DateTime::now(),
+              // "logicalSessionTimeoutMinutes": 30i32,
+              // "connectionId": 15i32,
+              "minWireVersion": 0i32,
+              "maxWireVersion": 21i32,
+              // "readOnly": false,
+              "ok": 1i32,
+            }
+          }
+        ])
+      })
+    },
+    Ok(MQLCommand::Ping { .. }) => {
+      Ok(Payload::OpMsg { 
+        flag_bits: 0,
+        sections: Vec::from([
+          OpMsgSection::KindZero {
+            document: doc! {
+              "ok": 1i32,
+            },
+          }
+        ])
+      })
+    },
+    _ => {
+      Ok(Payload::OpMsg { 
+        flag_bits: 0,
+        sections: Vec::from([
+          OpMsgSection::KindZero {
+            document: doc! {
+              "ok": 0,
+              "errmsg": format!("No such command"),
+              "code": 59,
+              "codeName": "CommandNotFound",
+            },
+          },
+        ]),
+      })
+    },
   }
 }
 
-fn get_command_from_op_msg_body(body: OpMsgSection) -> Result<MQLCommand, dyn std::error::Error> {
+// enum GetLogValue { Any, Global, StartupWarnings }
 
+enum MQLCommand {
+  // Create {
+  //   database: String,
+  //   collection: String,
+  // },
+  // Drop {
+  //   database: String,
+  //   collection: String,
+  // },
+  // DropDatabase {
+  //   database: String,
+  // },
+  // Insert {
+  //   database: String,
+  //   collection: String,
+  //   documents: Vec<Document>,
+  // },
+  // Find {
+  //   database: String,
+  //   collection: String,
+  //   filter: Document,
+  //   projection: Option<Document>,
+  //   sort: Option<Document>,
+  //   limit: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
+  //   skip: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
+  // },
+  // Count {
+  //   database: String,
+  //   collection: String,
+  //   query: Document,
+  //   limit: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
+  //   skip: Option<u32>, // TODO: Check if u32 is the appropriate type to use here
+  // },
+  // Update {
+  //   database: String,
+  //   collection: String,
+  //   updates: Vec<(Document, Document)>, // (q, u)
+  // },
+  // FindAndModify {
+  //   database: String,
+  //   collection: String,
+  //   query: Document,
+  //   update: Document,
+  // },
+  // Delete {
+  //   database: String,
+  //   collection: Document,
+  //   deletes: Vec<(Document, u32)>, // (q, limit); Check if u32 is the appropriate type here
+  // },
+  // BuildInfo {
+  //   database: String,
+  // },
+  // GetParameter {
+  //   database: String,
+  // },
+  // Aggregate {
+  //   database: String,
+  //   collection: String,
+  //   pipeline: Vec<AggregationStage>,
+  //   cursor: Document,
+  // },
+  Ping {
+    database: String,
+  },
+  // GetLog {
+  //   database: String,
+  //   value: GetLogValue,
+  // },
+  // Hello {
+  //   database: String,
+  // },
+  IsMaster {
+    database: String,
+  },
+  // EndSessions {
+  //   database: String,
+  // },
+  // ConnectionStatus {
+  //   database: String,
+  //   show_privileges: Option<bool>,
+  // },
+  // HostInfo {
+  //   database: String,
+  // },
+  // ListDatabases {
+  //   database: String,
+  //   name_only: Option<bool>,
+  // },
+  // ListCollections {
+  //   database: String,
+  //   name_only: Option<bool>,
+  // },
+  // ListIndexes {
+  //   database: String,
+  //   collection: String,
+  // },
+}
+
+// enum AggregationStage {
+//   Match {
+//     filter: Document,
+//   },
+//   Count {
+//     key: String,
+//   },
+//   Limit {
+//     limit: u32, // TODO: Check if u32 is the appropriate type
+//   },
+// }
+
+fn get_command_from_op_msg_body(body: &OpMsgSection) -> Result<MQLCommand, Box<dyn std::error::Error + Send + Sync>> {
+  match body {
+    OpMsgSection::KindZero { document } => {
+      let first_key = document.keys().next();
+      println!("{:?}", first_key);
+
+      let db = document.get_str("$db").ok().unwrap_or("admin").to_string();
+
+      if let Some(key) = first_key {
+        match key.as_str() {
+          "isMaster" => {
+            Ok(MQLCommand::IsMaster { database: db })
+          },
+          "ping" => {
+            Ok(MQLCommand::Ping { database: db })
+          }
+          _ => Err("Invalid command".into())
+        }
+      } else {
+        Err("Missing command key in body".into())
+      }
+    },
+    _ => Err("Expected a kind-zero section".into()),
+  }
 }
